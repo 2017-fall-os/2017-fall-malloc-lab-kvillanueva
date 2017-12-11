@@ -55,6 +55,9 @@ it with its neighbors.
 /* how much memory to ask for */
 const size_t DEFAULT_BRKSIZE = 0x100000;	/* 1M */
 
+/*Pointer to current block*/
+BlockPrefix_t *mostRecentBlock;
+
 /* create a block, mark it as free */
 BlockPrefix_t *makeFreeBlock(void *addr, size_t size) { 
 	BlockPrefix_t *p = addr;
@@ -185,12 +188,15 @@ numBlocks,
 ((size_t)arenaEnd - (size_t)arenaBegin) / 1024);
 }
 
-BlockPrefix_t *findFirstFit(size_t s) {	/* find first block with usable space > s */
+BlockPrefix_t *findNextFit(size_t s) {	/* find first block with usable space > s */
 BlockPrefix_t *p = arenaBegin;
 while (p) {
-	if (!p->allocated && computeUsableSpace(p) >= s)
+	if (!p->allocated && computeUsableSpace(p) >= s){
+		mostRecentBlock = p;
 		return p;
-	p = getNextPrefix(p);
+	}
+	p = getNextPrefix(mostRecentBlock);
+	mostRecentBlock = p;
 }
 return growArena(s);
 }
@@ -215,12 +221,12 @@ else
 
 /* these really are equivalent to malloc & free */
 
-void *firstFitAllocRegion(size_t s) {
+void *nextFitAllocRegion(size_t s) {
 size_t asize = align8(s);
 BlockPrefix_t *p;
 if (arenaBegin == 0)		/* arena uninitialized? */
 	initializeArena();
-p = findFirstFit(s);		/* find a block */
+p = findNextFit(s);		/* find a block */
 if (p) {			/* found a block */
 	size_t availSize = computeUsableSpace(p);
 	if (availSize >= (asize + prefixSize + suffixSize + 8)) { /* split block? */
@@ -257,6 +263,8 @@ in r + s, then just adjust sizes of r & s.
 */
 void *resizeRegion(void *r, size_t newSize) {
 int oldSize;
+// int nextPSize;
+// size_t oldAndNew;
 BlockPrefix_t *p = regionToPrefix(r);
 BlockPrefix_t *nextp = getNextPrefix(p);
 int nextpNum = getNextPrefix(p);
@@ -270,25 +278,26 @@ else
 
 if (oldSize >= newSize)	/* old region is big enough */
 	return r;
-
-else if(nextpNum != 0){
-	size_t nextPSize=computeUsableSpace(nextp);
-	size_t oldAndNext=nextPSize+oldSize;
-	if(oldAndNext>=align8(newSize)){
-		if (oldAndNext >= (align8(newSize) + prefixSize + suffixSize + 8)) { /* split block? */
-			void *freeSliverStart = (void *)p + prefixSize + suffixSize + align8(newSize);
-			void *freeSliverEnd = computeNextPrefixAddr(nextp);
-			makeFreeBlock(freeSliverStart, freeSliverEnd - freeSliverStart);
-			makeFreeBlock(p, freeSliverStart - (void *)p); /* piece being allocated */
-		}
-		p->allocated = 1;		/* mark as allocated */
-		return prefixToRegion(p);	/* convert to *region */
-	}
-}
+// else if(nextpNum != 0){
+// 	size_t nextPSize=computeUsableSpace(nextp);
+// 	size_t oldAndNext=nextPSize+oldSize;
+// 	if(oldAndNext>=align8(newSize)){
+// 		// size_t asize = align8(newSize);
+// 		// size_t availSize = computeUsableSpace(p);
+// 		if (oldAndNext >= (align8(newSize) + prefixSize + suffixSize + 8)) { /* split block? */
+// 			void *freeSliverStart = (void *)p + prefixSize + suffixSize + align8(newSize);
+// 			void *freeSliverEnd = computeNextPrefixAddr(nextp);
+// 			makeFreeBlock(freeSliverStart, freeSliverEnd - freeSliverStart);
+// 			makeFreeBlock(p, freeSliverStart - (void *)p); /* piece being allocated */
+// 		}
+// 		p->allocated = 1;		/* mark as allocated */
+// 		return prefixToRegion(p);	/* convert to *region */
+// 	}
+// }
 
 else {			/* allocate new region & copy old data */
 	char *o = (char *)r;	/* treat both regions as char* */
-	char *n = (char *)firstFitAllocRegion(newSize);
+	char *n = (char *)nextFitAllocRegion(newSize);
 	int i;
 	for (i = 0; i < oldSize; i++) /* copy byte-by-byte, should use memcpy */
 		n[i] = o[i];
